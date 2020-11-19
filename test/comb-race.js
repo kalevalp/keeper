@@ -1,14 +1,10 @@
 'use strict';
-const keeper = require('../');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function rawMain() {
-    // Promise.all([sleep(10),sleep(50), sleep(500)]).then(() => console.log("Slept"));
-    // await sleep(1000);
-
+async function handler() {
     await Promise.race([sleep(10).then(() => console.log("Short wait done")),
                         sleep(50).then(() => {throw "err";}),
                         sleep(500).then(() => console.log("Long wait done"))])
@@ -17,6 +13,4 @@ async function rawMain() {
     console.log("Main");
 }
 
-const main = keeper.wrapInKeeper(rawMain);
-
-main();
+module.exports.handler = handler;

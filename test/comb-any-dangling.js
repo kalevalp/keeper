@@ -1,11 +1,10 @@
 'use strict';
-const keeper = require('../');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function rawMain() {
+async function handler() {
     await Promise.any([
         sleep(10),
         sleep(50).then(() => {throw "err";}),
@@ -17,6 +16,4 @@ async function rawMain() {
     console.log("Main");
 }
 
-const main = keeper.wrapInKeeper(rawMain);
-
-main();
+module.exports.handler = handler;
