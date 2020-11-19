@@ -1,7 +1,6 @@
-const ah = require('async_hooks');
 const util = require('util');
 const {NodeVM,VMScript} = require("vm2");
-
+const fs = require('fs');
 
 const unresolvedPromises = {};
 const out = [];
@@ -9,34 +8,6 @@ const stacks = [];
 
 let resolveJoin = () => {};
 let rejectJoin = () => {};
-
-const promiseHook =
-      ah.createHook({
-          init : (id, type, triggerAsyncId, resource) => {
-              out.push(util.inspect({id, type, triggerAsyncId, resource}));
-              stacks.push((new Error()).stack);
-
-              if (type === 'PROMISE' && !resource.isChainedPromise) {
-                  unresolvedPromises[id] = (new Error()).stack;
-              }
-          },
-          promiseResolve : (id) => {
-              debugger;
-              if (unresolvedPromises[id]) {
-                  delete unresolvedPromises[id];
-              }
-              if (!checkUnresolvedPromises()) {
-                  debugger;
-                  resolveJoin();
-              }
-          },
-      });
-
-promiseHook.enable();
-
-function checkUnresolvedPromises() {
-    return unresolvedPromises.size !== 0;
-}
 
 function wrapInKeeper(handler) {
     return async (event, process) => {
@@ -67,63 +38,78 @@ function wrapInKeeper(handler) {
 
 function createKeeperHandler(originalLambdaFile,
                              originalLambdaHandler,
-                             runLocally,
-                             updateContext) {
+                             runLocally) {
 
     const originalLambdaPath    = `${runLocally?'':'/var/task/'}${originalLambdaFile}`;
     const originalLambdaCode    = fs.readFileSync(originalLambdaFile, 'utf8');
     const originalLambdaScript  = new VMScript(originalLambdaCode);
 
-    const promiseForest = {};
+    const promiseForest = [];
 
     const promiseWrapper = function (...params) {
+        console.log("!! New promiseWrapper !!");
         const result = new Promise(...params);
 
-        promiseForest[result] = {};
+        console.log("## Adding to promiseForest ##");
+        promiseForest.push(result);
 
         result.shadow_catch = result.catch;
         result.shadow_finally = result.finally;
         result.shadow_then = result.then;
 
         result.catch = function (...params) {
+            debugger;
             const catchPromise = result.shadow_catch(...params);
             // Handle a call that returns a promise
+            console.log("!! New catch clause !!");
 
-            if (promiseForest[this]) {
-                delete promiseForest[this];
-            }
-            promiseForest[catchPromise] = {};
+            // if (promiseForest[this]) {
+            //     console.log("## Removing from promiseForest ##");
+            //     delete promiseForest[this];
+            // }
+            console.log("## Adding to promiseForest ##");
+            promiseForest.push(catchPromise);
 
-            return catchPromise;
+            return new promiseWrapper(resolve => resolve(catchPromise));
         };
         result.finally = function (...params) {
+            debugger;
             const finallyPromise = result.shadow_finally(...params);
             // Handle a call that returns a promise
+            console.log("!! New finally clause !!")
 
-            if (promiseForest[this]) {
-                delete promiseForest[this];
-            }
-            promiseForest[finallyPromise] = {};
+            // if (promiseForest[this]) {
+            //     console.log("## Removing from promiseForest ##");
+            //     delete promiseForest[this];
+            // }
+            console.log("## Adding to promiseForest ##");
+            promiseForest.push(finallyPromise);
 
-            return finallyPromise;
+            return new promiseWrapper(resolve => resolve(finallyPromise));
         };
         result.then = function (...params) {
+            debugger;
             const thenPromise = result.shadow_then(...params);
             // Handle a call that returns a promise
+            console.log("!! New then clause !!")
 
-            if (promiseForest[this]) {
-                delete promiseForest[this];
-            }
-            promiseForest[thenPromise] = {};
+            // if (promiseForest[this]) {
+            //     console.log("## Removing to promiseForest ##");
+            //     delete promiseForest[this];
+            // }
+            console.log("## Adding to promiseForest ##");
+            promiseForest.push(thenPromise);
 
-            return thenPromise;
+            return new promiseWrapper(resolve => resolve(thenPromise));
         };
 
         return result;
     }
 
     promiseWrapper.all = (...params) => {
-
+        console.log("!! New Promise.all clause !!")
+        const result = Promise.all(...params);
+        return new promiseWrapper(resolve => resolve(result));
     }
     promiseWrapper.allSettled = (...params) => {}
     promiseWrapper.any = (...params) => {}
@@ -137,7 +123,7 @@ function createKeeperHandler(originalLambdaFile,
         JSON: {
             parse: JSON.parse,
             stringify: JSON.stringify,
-        }
+        },
         Promise: promiseWrapper
     }
 
@@ -155,10 +141,37 @@ function createKeeperHandler(originalLambdaFile,
 
     const vmExports = vm.run(originalLambdaScript, originalLambdaPath);
 
+    return async (...params) => {
+        console.log("%% Starting handler run");
+        const result = await vmExports[originalLambdaHandler](...params);
+        console.log("%% Finished handler run");
+
+        console.log("%% Forest:", promiseForest);
+        // console.log(Object.keys(promiseForest)[0].then);
+
+        // const x = {};
+        // const y = Promise.resolve(42);
+        // x[y] = {};
+        // console.log(y.then);
+        // console.log(Object.keys(x)[0].then);
+
+        for (p of promiseForest) {
+            try {
+                await p;
+            } catch {}
+        }
+
+        console.log("%% Finished awaiting outstanding promises");
+
+        // const tail = await Promise.all(promiseForest);
+
+        // console.log(tail);
+
+
+        return result;
+    };
+
 }
 
-
-
-
-
 module.exports.wrapInKeeper = wrapInKeeper;
+module.exports.createKeeperHandler = createKeeperHandler;
