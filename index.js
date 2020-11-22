@@ -46,9 +46,11 @@ function createKeeperHandler(originalLambdaFile,
 
     const promiseForest = [];
 
-    const promiseWrapper = function (...params) {
+    const promiseWrapper = function (baseResolve, baseReject) {
+        const resolve = (...params) => baseResolve(...params);
+        const reject = (...params) => baseReject(...params);
         console.log("!! New promiseWrapper !!");
-        const result = new Promise(...params);
+        const result = new Promise(resolve, reject);
 
         console.log("## Adding to promiseForest ##");
         promiseForest.push(result);
