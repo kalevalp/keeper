@@ -1,9 +1,12 @@
 const keeper = require('../');
 
-const tests = ['comb-all.js'/*,
-               'comb-any-dangling.js',
-               'comb-race.js',
-               'promise.js'*/];
+const tests = [
+    'simple-no-leak.js',
+    'simple-leak.js',
+    /* 'comb-all.js',
+     * 'comb-any-dangling.js',
+     * 'comb-race.js',
+     * 'promise.js' */];
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
