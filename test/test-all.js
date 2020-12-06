@@ -1,8 +1,10 @@
 const keeper = require('../');
 
 const tests = [
-    'simple-no-leak.js',
-    'simple-leak.js',
+    'simple-fspromise-no-leak.js',
+    // 'simple-async-no-leak.js',
+    // 'simple-no-leak.js',
+    // 'simple-leak.js',
     /* 'comb-all.js',
      * 'comb-any-dangling.js',
      * 'comb-race.js',
