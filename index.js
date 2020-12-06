@@ -44,17 +44,53 @@ function createKeeperHandler(originalLambdaFile,
     const originalLambdaCode    = fs.readFileSync(originalLambdaFile, 'utf8');
     const originalLambdaScript  = new VMScript(originalLambdaCode);
 
-    const promiseForest = [];
+    const promiseStackTrace = [];
 
-    const promiseWrapper = function (baseResolve, baseReject) {
-        const resolve = (...params) => baseResolve(...params);
-        const reject = (...params) => baseReject(...params);
+    const unresolved = new Set();
+
+    const promiseWrapper = function (baseOperation) {
+
+        let resultClosure;
+        let resolved;
+
+        const opertaion = function (baseResolve, baseReject) {
+
+            const resolve = function (...params) {
+                console.log("## Resolving promise via resolve in constructor", util.inspect(params),"##");
+                resolved = true;
+                debugger;
+                if (unresolved.has(resultClosure)) {
+                    console.log("## Removing from unresolved via resolve in constructor ##");
+                    unresolved.delete(resultClosure);
+                }
+                return baseResolve(...params);
+            }
+            const reject = function (...params) {
+                console.log("## Resolving promise via reject in constructor ##");
+                resolved = true;
+                if (unresolved.has(resultClosure)) {
+                    console.log("## Removing from unresolved via reject in constructor ##");
+                    unresolved.delete(resultClosure);
+                }
+                return baseReject(...params);
+            }
+
+            return baseOperation(resolve, reject);
+        }
+
+
         console.log("!! New promiseWrapper !!");
-        const result = new Promise(resolve, reject);
+        resultClosure = new Promise(opertaion);
 
-        console.log("## Adding to promiseForest ##");
-        promiseForest.push(result);
+        const result = resultClosure;
 
+        if (resolved) {
+            console.log("## Already resolved, not adding to unresolved ##");
+        } else {
+            console.log("## Adding to unresolved via constructor ##");
+            unresolved.add(result);
+            promiseStackTrace.push({pr: result, stackTrace: (new Error()).stack});
+        }
         result.shadow_catch = result.catch;
         result.shadow_finally = result.finally;
         result.shadow_then = result.then;
@@ -65,12 +101,12 @@ function createKeeperHandler(originalLambdaFile,
             // Handle a call that returns a promise
             console.log("!! New catch clause !!");
 
-            // if (promiseForest[this]) {
-            //     console.log("## Removing from promiseForest ##");
-            //     delete promiseForest[this];
+            // if (unresolved[this]) {
+            //     console.log("## Removing from unresolved ##");
+            //     delete unresolved[this];
             // }
-            console.log("## Adding to promiseForest ##");
-            promiseForest.push(catchPromise);
+            console.log("## Adding to unresolved ##");
+            unresolved.add(catchPromise);
 
             return new promiseWrapper(resolve => resolve(catchPromise));
         };
@@ -80,12 +116,12 @@ function createKeeperHandler(originalLambdaFile,
             // Handle a call that returns a promise
             console.log("!! New finally clause !!")
 
-            // if (promiseForest[this]) {
-            //     console.log("## Removing from promiseForest ##");
-            //     delete promiseForest[this];
+            // if (unresolved[this]) {
+            //     console.log("## Removing from unresolved ##");
+            //     delete unresolved[this];
             // }
-            console.log("## Adding to promiseForest ##");
-            promiseForest.push(finallyPromise);
+            console.log("## Adding to unresolved ##");
+            unresolved.add(finallyPromise);
 
             return new promiseWrapper(resolve => resolve(finallyPromise));
         };
@@ -95,12 +131,12 @@ function createKeeperHandler(originalLambdaFile,
             // Handle a call that returns a promise
             console.log("!! New then clause !!")
 
-            // if (promiseForest[this]) {
-            //     console.log("## Removing to promiseForest ##");
-            //     delete promiseForest[this];
+            // if (unresolved[this]) {
+            //     console.log("## Removing to unresolved ##");
+            //     delete unresolved[this];
             // }
-            console.log("## Adding to promiseForest ##");
-            promiseForest.push(thenPromise);
+            console.log("## Adding to unresolved ##");
+            unresolved.add(thenPromise);
 
             return new promiseWrapper(resolve => resolve(thenPromise));
         };
@@ -108,7 +144,7 @@ function createKeeperHandler(originalLambdaFile,
         return result;
     }
 
-    promiseWrapper.all = (...params) => {
+    promiseWrapper.all = function (...params) {
         console.log("!! New Promise.all clause !!")
         const result = Promise.all(...params);
         return new promiseWrapper(resolve => resolve(result));
@@ -148,8 +184,10 @@ function createKeeperHandler(originalLambdaFile,
         const result = await vmExports[originalLambdaHandler](...params);
         console.log("%% Finished handler run");
 
-        console.log("%% Forest:", promiseForest);
-        // console.log(Object.keys(promiseForest)[0].then);
+        console.log("%% unresolved promises:", unresolved);
+        console.log("%% unresolved promises with stacks:", promiseStackTrace.map(pair => unresolved.has(pair.pr)));
+        console.log("%% promise stack traces:", promiseStackTrace);
+        // console.log(Object.keys(unresolved)[0].then);
 
         // const x = {};
         // const y = Promise.resolve(42);
@@ -157,7 +195,7 @@ function createKeeperHandler(originalLambdaFile,
         // console.log(y.then);
         // console.log(Object.keys(x)[0].then);
 
-        for (p of promiseForest) {
+        for (p of unresolved) {
             try {
                 await p;
             } catch {}
@@ -165,7 +203,7 @@ function createKeeperHandler(originalLambdaFile,
 
         console.log("%% Finished awaiting outstanding promises");
 
-        // const tail = await Promise.all(promiseForest);
+        // const tail = await Promise.all(unresolved);
 
         // console.log(tail);
 
